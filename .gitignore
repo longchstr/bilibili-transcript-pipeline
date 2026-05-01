@@ -1,0 +1,11 @@
+local_audio/
+local_audio_archive/
+*.m4a
+*.mp3
+*.mp4
+*.webm
+*.wav
+*.tmp
+__pycache__/
+.venv/
+.DS_Store
