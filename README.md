@@ -54,6 +54,38 @@ project/
   scripts/
 ```
 
+## Status tracking
+
+The batch runner appends events to:
+
+```text
+metadata/processing_status.jsonl
+logs/pipeline_errors.jsonl
+```
+
+Each video can be in one of these states:
+
+- `pending`: in the master list but not processed yet
+- `download_status=done, asr_status=pending`: audio downloaded, not transcribed
+- `download_status=done, asr_status=running`: ASR is running
+- `download_status=done, asr_status=done`: transcript generated
+- `asr_status=failed` or `download_status=failed`: needs retry/debug
+
+Generate a summary report anytime:
+
+```bash
+python scripts/status_report.py \
+  --videos metadata/videos_master.jsonl \
+  --status metadata/processing_status.jsonl
+```
+
+This writes:
+
+```text
+metadata/status_report.csv
+metadata/status_summary.json
+```
+
 ## Install
 
 ```bash

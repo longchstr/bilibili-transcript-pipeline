@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-import argparse, json, subprocess, traceback, shutil
+import argparse, json, subprocess, traceback, datetime
 from pathlib import Path
 
 
 def read_jsonl(path):
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text(encoding="utf-8").splitlines():
         if line.strip():
             yield json.loads(line)
 
@@ -20,6 +23,19 @@ def append_jsonl(path, obj):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+
+def now_iso():
+    return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def latest_status_map(status_path):
+    latest = {}
+    for rec in read_jsonl(status_path) or []:
+        bvid = rec.get("bvid")
+        if bvid:
+            latest[bvid] = rec
+    return latest
 
 
 def main():
@@ -41,13 +57,10 @@ def main():
     for d in [audio_dir, transcripts_dir, status_path.parent, error_path.parent]:
         d.mkdir(parents=True, exist_ok=True)
 
-    done = set()
-    if status_path.exists():
-        for rec in read_jsonl(status_path):
-            if rec.get("asr_status") == "done":
-                done.add(rec.get("bvid"))
+    latest = latest_status_map(status_path)
+    done = {bvid for bvid, rec in latest.items() if rec.get("asr_status") == "done"}
 
-    videos = list(read_jsonl(args.videos))
+    videos = list(read_jsonl(args.videos) or [])
     if args.limit:
         videos = videos[: args.limit]
 
@@ -56,17 +69,54 @@ def main():
         if bvid in done:
             print("SKIP", bvid)
             continue
+        base = {**video, "bvid": bvid, "updated_at": now_iso()}
         try:
             audio = find_audio(audio_dir, bvid)
-            if not audio:
+            if audio:
+                append_jsonl(status_path, {
+                    **base,
+                    "download_status": "done",
+                    "asr_status": "pending",
+                    "audio_path": str(audio),
+                    "event": "audio_already_exists",
+                    "error": None,
+                })
+            else:
+                append_jsonl(status_path, {
+                    **base,
+                    "download_status": "running",
+                    "asr_status": "pending",
+                    "event": "download_started",
+                    "error": None,
+                })
                 cmd = ["python", "scripts/download_audio.py", "--bvid", bvid, "--out", str(audio_dir)]
                 if args.cookies_from_browser:
                     cmd += ["--cookies-from-browser", args.cookies_from_browser]
                 subprocess.run(cmd, cwd=workdir, check=True)
                 audio = find_audio(audio_dir, bvid)
-            if not audio:
-                raise RuntimeError("audio not found after download")
+                if not audio:
+                    raise RuntimeError("audio not found after download")
+                append_jsonl(status_path, {
+                    **base,
+                    "updated_at": now_iso(),
+                    "download_status": "done",
+                    "asr_status": "pending",
+                    "audio_path": str(audio),
+                    "event": "download_done",
+                    "error": None,
+                })
 
+            append_jsonl(status_path, {
+                **base,
+                "updated_at": now_iso(),
+                "download_status": "done",
+                "asr_status": "running",
+                "audio_path": str(audio),
+                "event": "asr_started",
+                "asr_engine": "faster-whisper",
+                "asr_model": args.model,
+                "error": None,
+            })
             subprocess.run([
                 "python", "scripts/transcribe_audio.py",
                 "--audio", str(audio),
@@ -86,18 +136,31 @@ def main():
                 cleanup = "deleted"
 
             append_jsonl(status_path, {
-                **video,
+                **base,
+                "updated_at": now_iso(),
                 "download_status": "done",
                 "asr_status": "done",
                 "audio_path": str(audio),
                 "transcript_txt": str(transcripts_dir / "txt" / f"{bvid}.txt"),
+                "transcript_jsonl": str(transcripts_dir / "jsonl" / f"{bvid}.jsonl"),
+                "transcript_srt": str(transcripts_dir / "srt" / f"{bvid}.srt"),
                 "cleanup_action": cleanup,
+                "event": "asr_done",
+                "asr_engine": "faster-whisper",
+                "asr_model": args.model,
                 "error": None,
             })
             print("DONE", bvid)
         except Exception as e:
-            append_jsonl(error_path, {**video, "error": repr(e), "traceback": traceback.format_exc()})
-            append_jsonl(status_path, {**video, "download_status": "unknown", "asr_status": "failed", "error": repr(e)})
+            append_jsonl(error_path, {**base, "updated_at": now_iso(), "error": repr(e), "traceback": traceback.format_exc()})
+            append_jsonl(status_path, {
+                **base,
+                "updated_at": now_iso(),
+                "download_status": "failed" if not find_audio(audio_dir, bvid) else "done",
+                "asr_status": "failed",
+                "event": "failed",
+                "error": repr(e),
+            })
             print("FAILED", bvid, e)
 
 
