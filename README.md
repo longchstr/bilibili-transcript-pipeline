@@ -155,3 +155,19 @@ yt-dlp --cookies-from-browser chrome --flat-playlist --dump-json \
 ## Legal / ethical note
 
 Use this for personal research, indexing, accessibility, and authorized datasets. Respect Bilibili terms, creator rights, and copyright restrictions. Do not redistribute copyrighted transcripts/audio without permission.
+
+
+## 2026 production update: FunASR rolling batches
+
+This repo now includes the newer production-tested Bilibili/FunASR workflow:
+
+- `scripts/funasr_batch_pipeline.py`: loads FunASR once per batch, downloads Bilibili audio with `yt-dlp`, writes txt/jsonl/srt/raw_funasr outputs, and emits `processing_status.jsonl`, `status_summary.json`, and `status_report.csv`.
+- `scripts/continuous_funasr_autorun_template.py`: generic watchdog template for staged ingest, safety scan, commit/push, and starting the next batch.
+- `docs/rolling-production.md`: operational rules for long rolling corpus jobs, including failure deferral and no-audio Git hygiene.
+- `docs/bbdown-upspace-export.md`: QR-login full submission export fallback when UP-space listing hits Bilibili anti-bot controls.
+
+Recommended split:
+
+- Keep this repo public and generic: scripts, templates, docs, small examples.
+- Keep creator-specific corpora private when needed: transcripts, status ledgers, metadata, and local automation config.
+- Never commit audio/video intermediates or cookies/tokens.
